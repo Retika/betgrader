@@ -118,20 +118,14 @@ Return only the URL, nothing else."""
         return None, "", ""
 
     def grade_bet(self, table_data: Dict[str, Any], sportsbet_prompt: str) -> str:
-        prompt = f"""Grade this sports bet based on the statistical data.
-
-Bet Format Explanation:
-- 'o' means over (bet wins if actual value is GREATER than the number)
-- 'u' means under (bet wins if actual value is LESS than the number)
-- Exact match equals a 'Push'
-- If data is unclear or missing, return 'N/A'
+        prompt = f"""Grade this sports bet based on the data available.
 
 Original Bet: {sportsbet_prompt}
 Statistical Data: {table_data}
 
-Use your best judgement based on the data available, sometimes PTS is represented as P, or SOG is Shots on Goal, so you're really looking for Shots, or S.  Review the data carefully and come to a proper conclusion with your knowledge of the sport and how its statistics are commonly tracked.  You are a professional sports better, sports analyst, and also a professional statistician.
+Use your best judgement based on the data available, sometimes PTS is represented as P, or SOG is Shots on Goal, so you're really looking for Shots, or S.  Review the data carefully and come to a proper conclusion with your knowledge of the sport and how its statistics are commonly tracked.  You are a professional sports better, sports analyst, and also a professional statistician. Something like o2.5 SOG means the player needs over 2.5 Shots on Goal to be considered a Win and vice versa for u2.5.
 
-Analyze the data carefully and respond with ONLY one of these options: 'Win', 'Loss', 'Push', or 'N/A'"""
+Analyze the data carefully and respond with ONLY one of these options: 'Win', 'Loss', 'Push', or 'N/A'.  The response should ONLY be one of these four options as I will be outputting this directly into another function"""
 
         self.log_debug(f"\nGrading Bet: {sportsbet_prompt}")
         self.log_debug(f"Table Data: {table_data}")
