@@ -15,15 +15,16 @@ st.set_page_config(
 
 # Initialize session state for storing API key
 if 'groq_api_key' not in st.session_state:
-    st.session_state.groq_api_key = st.secrets["GROQ_API_KEY"]
+    # Try multiple sources for API key
+    api_key = (
+        os.getenv('GROQ_API_KEY', '') or  # Try environment variable first
+        getattr(st.secrets, 'GROQ_API_KEY', '') if hasattr(st.secrets, 'GROQ_API_KEY') else ''  # Then try secrets
+    )
+    st.session_state.groq_api_key = api_key
+
+# Initialize history
 if 'history' not in st.session_state:
     st.session_state.history = []
-
-def grade_bet(bet: str, api_key: str, show_debug: bool = False) -> tuple[str, list, dict]:
-    """Grade a single bet and return result, debug info, and table data"""
-    grader = BetGrader(api_key, debug=show_debug)
-    result, table_data = grader.process_bet(bet)  # Modified to return table_data
-    return result, grader.debug_output, table_data
 
 def display_table_data(table_data: dict):
     """Display table data in a formatted way"""
@@ -33,12 +34,20 @@ def display_table_data(table_data: dict):
     else:
         st.warning("No table data available")
 
+def grade_bet(bet: str, api_key: str, show_debug: bool = False) -> tuple[str, list, dict]:
+    """Grade a single bet and return result, debug info, and table data"""
+    grader = BetGrader(api_key, debug=show_debug)
+    result, table_data = grader.process_bet(bet)
+    return result, grader.debug_output, table_data
+
 def main():
     st.title("🎲 Sports Bet Grader")
     
     # Sidebar for API key and history
     with st.sidebar:
         st.header("Settings")
+        
+        # API Key input with current value
         api_key = st.text_input(
             "Enter Groq API Key",
             type="password",
@@ -47,6 +56,13 @@ def main():
         )
         st.session_state.groq_api_key = api_key
         
+        # Show API key status
+        if st.session_state.groq_api_key:
+            st.success("API Key is set")
+        else:
+            st.warning("Please enter an API Key to use the app")
+        
+        # Clear history button
         if st.button("Clear History") and st.session_state.history:
             st.session_state.history = []
             st.success("History cleared!")
@@ -133,11 +149,11 @@ def main():
                                     threshold = "unknown"
                                 
                                 if table_data and 'table_data' in table_data and table_data['table_data']:
-                                    actual_value = table_data['table_data'][0]  # Get first row of data
+                                    actual_value = table_data['table_data'][0]
                                     st.markdown(f"""
                                     **Bet Details:**
                                     - Threshold: {threshold}
-                                    - Actual Value: {actual_value}
+                                    - Actual Stats: {actual_value}
                                     """)
                             
                             # Display Debug Information
@@ -159,18 +175,25 @@ def main():
                 if show_debug:
                     st.exception(e)
 
+    # History tab
     with tab2:
         if st.session_state.history:
             st.markdown("### Bet History")
             
+            # Convert history to DataFrame for easy display
             history_df = pd.DataFrame(st.session_state.history)
             
             for _, row in history_df.iterrows():
                 with st.expander(f"{row['timestamp'].strftime('%Y-%m-%d %H:%M:%S')} - {row['bet']}", expanded=False):
-                    st.code(row['bet'])  # Show original bet
+                    # Show original bet
+                    st.code(row['bet'])
+                    
+                    # Show statistical data
                     if 'data' in row:
                         st.markdown("#### Statistical Data")
                         display_table_data(row['data'])
+                    
+                    # Show result
                     st.markdown("#### Result")
                     if row['result'] == "Win":
                         st.success(f"Result: {row['result']}")
