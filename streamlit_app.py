@@ -3,6 +3,8 @@ from groq import Groq
 from data_statmuse_tablepull import TableExtractor
 from groq_bet_grader import BetGrader
 import os
+import pandas as pd
+from datetime import datetime
 
 # Set page config
 st.set_page_config(
@@ -11,11 +13,25 @@ st.set_page_config(
     layout="wide"
 )
 
-# Initialize session state for storing API key and history
+# Initialize session state for storing API key
 if 'groq_api_key' not in st.session_state:
-    st.session_state.groq_api_key = os.getenv('GROQ_API_KEY', '')
+    st.session_state.groq_api_key = st.secrets["GROQ_API_KEY"]
 if 'history' not in st.session_state:
     st.session_state.history = []
+
+def grade_bet(bet: str, api_key: str, show_debug: bool = False) -> tuple[str, list, dict]:
+    """Grade a single bet and return result, debug info, and table data"""
+    grader = BetGrader(api_key, debug=show_debug)
+    result, table_data = grader.process_bet(bet)  # Modified to return table_data
+    return result, grader.debug_output, table_data
+
+def display_table_data(table_data: dict):
+    """Display table data in a formatted way"""
+    if table_data and 'table_data' in table_data:
+        df = pd.DataFrame(table_data['table_data'])
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.warning("No table data available")
 
 def main():
     st.title("🎲 Sports Bet Grader")
@@ -23,8 +39,6 @@ def main():
     # Sidebar for API key and history
     with st.sidebar:
         st.header("Settings")
-        
-        # API Key input
         api_key = st.text_input(
             "Enter Groq API Key",
             type="password",
@@ -33,12 +47,11 @@ def main():
         )
         st.session_state.groq_api_key = api_key
         
-        # Clear history button
         if st.button("Clear History") and st.session_state.history:
             st.session_state.history = []
             st.success("History cleared!")
 
-    # Main content area tabs
+    # Main content
     tab1, tab2 = st.tabs(["Grade Bets", "History"])
 
     with tab1:
@@ -49,7 +62,6 @@ def main():
         Example: `11/7/2024    A.Iosivas o21.5 Rec Yds | CIN@BAL    NFL`
         """)
 
-        # Input form
         with st.form("bet_form"):
             bet_input = st.text_area(
                 "Bet Details",
@@ -57,7 +69,6 @@ def main():
                 help="Enter one bet per line in the specified format"
             )
             
-            # Additional options
             col1, col2 = st.columns(2)
             with col1:
                 show_debug = st.checkbox("Show Debug Output", value=False)
@@ -66,80 +77,101 @@ def main():
             
             submitted = st.form_submit_button("Grade Bet(s)")
 
-        # Process bets when form is submitted
         if submitted:
             if not st.session_state.groq_api_key:
                 st.error("Please enter your Groq API key in the sidebar first!")
                 return
 
             try:
-                grader = BetGrader(st.session_state.groq_api_key, debug=show_debug)
-                
-                # Process each bet
                 bets = [bet.strip() for bet in bet_input.split('\n') if bet.strip()]
                 
                 if not bets:
                     st.warning("Please enter at least one bet to grade.")
                     return
                 
-                # Results section
                 st.markdown("### Results")
                 
-                # Create a container for results
-                results_container = st.container()
-                
-                with results_container:
-                    for bet in bets:
-                        # Create expander for each bet
-                        with st.expander(f"Bet: {bet}", expanded=True):
-                            with st.spinner("Grading..."):
-                                result = grader.process_bet(bet)
+                for bet in bets:
+                    with st.expander(f"Bet: {bet}", expanded=True):
+                        with st.spinner("Grading..."):
+                            result, debug_output, table_data = grade_bet(
+                                bet, 
+                                st.session_state.groq_api_key, 
+                                show_debug
+                            )
+                            
+                            # Display Original Bet
+                            st.markdown("#### Original Bet")
+                            st.code(bet)
+                            
+                            # Display Data Used for Grading
+                            st.markdown("#### Statistical Data")
+                            display_table_data(table_data)
+                            
+                            # Display Result with Explanation
+                            st.markdown("#### Result")
+                            col1, col2 = st.columns([1, 4])
+                            
+                            with col1:
+                                if result == "Win":
+                                    st.success("WIN")
+                                elif result == "Loss":
+                                    st.error("LOSS")
+                                elif result == "Push":
+                                    st.warning("PUSH")
+                                else:
+                                    st.info("N/A")
+                            
+                            with col2:
+                                # Extract bet details
+                                bet_parts = bet.split()
+                                for part in bet_parts:
+                                    if 'o' in part or 'u' in part:
+                                        threshold = part
+                                        break
+                                else:
+                                    threshold = "unknown"
                                 
-                                # Display result with appropriate styling
-                                col1, col2 = st.columns([3, 1])
-                                
-                                with col1:
-                                    st.markdown(f"**Original Bet:** `{bet}`")
-                                
-                                with col2:
-                                    if result == "Win":
-                                        st.success("WIN")
-                                    elif result == "Loss":
-                                        st.error("LOSS")
-                                    elif result == "Push":
-                                        st.warning("PUSH")
-                                    else:  # N/A
-                                        st.info("N/A")
-                                
-                                # Show debug output if enabled
-                                if show_debug:
-                                    st.code(grader.debug_output)  # You'll need to add this attribute to your BetGrader class
-                                
-                                # Add to history if auto-archive is enabled
-                                if auto_archive:
-                                    st.session_state.history.append({
-                                        'bet': bet,
-                                        'result': result,
-                                        'timestamp': pd.Timestamp.now()
-                                    })
+                                if table_data and 'table_data' in table_data and table_data['table_data']:
+                                    actual_value = table_data['table_data'][0]  # Get first row of data
+                                    st.markdown(f"""
+                                    **Bet Details:**
+                                    - Threshold: {threshold}
+                                    - Actual Value: {actual_value}
+                                    """)
+                            
+                            # Display Debug Information
+                            if show_debug:
+                                st.markdown("#### Debug Output")
+                                for msg in debug_output:
+                                    st.text(msg)
+                            
+                            if auto_archive:
+                                st.session_state.history.append({
+                                    'bet': bet,
+                                    'result': result,
+                                    'data': table_data,
+                                    'timestamp': datetime.now()
+                                })
 
             except Exception as e:
                 st.error(f"Error: {str(e)}")
                 if show_debug:
                     st.exception(e)
 
-    # History tab
     with tab2:
         if st.session_state.history:
             st.markdown("### Bet History")
             
-            # Convert history to DataFrame for easy display
-            import pandas as pd
             history_df = pd.DataFrame(st.session_state.history)
             
-            # Display history with colored results
             for _, row in history_df.iterrows():
                 with st.expander(f"{row['timestamp'].strftime('%Y-%m-%d %H:%M:%S')} - {row['bet']}", expanded=False):
+                    st.code(row['bet'])  # Show original bet
+                    if 'data' in row:
+                        st.markdown("#### Statistical Data")
+                        display_table_data(row['data'])
+                    st.markdown("#### Result")
                     if row['result'] == "Win":
                         st.success(f"Result: {row['result']}")
                     elif row['result'] == "Loss":
