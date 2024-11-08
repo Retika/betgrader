@@ -98,24 +98,25 @@ Analyze the data carefully and respond with ONLY one of these options: 'Win', 'L
         self.log_debug(f"Grade Result: {result}")
         return result
 
-    def process_bet(self, sportsbet_prompt: str) -> str:
-        """Process the entire bet grading workflow."""
-        try:
-            self.debug_output = []  # Clear previous debug output
-            self.log_debug(f"\n=== Processing Bet: {sportsbet_prompt} ===")
+    def process_bet(self, sportsbet_prompt: str) -> tuple[str, Optional[Dict[str, Any]]]:
+    """Process the entire bet grading workflow."""
+    try:
+        self.debug_output = []  # Clear previous debug output
+        self.log_debug(f"\n=== Processing Bet: {sportsbet_prompt} ===")
 
-            query = self.generate_query(sportsbet_prompt)
-            url = self.generate_statmuse_url(query)
-            table_data = self.table_extractor.get_table_from_url(url)
-            
-            if not table_data:
-                self.log_debug("No table data found - returning N/A")
-                return "N/A"
-            
-            result = self.grade_bet(table_data, sportsbet_prompt)
-            self.log_debug(f"\n=== Final Result: {result} ===")
-            return result
-            
-        except Exception as e:
-            self.log_debug(f"Error processing bet: {str(e)}")
-            return "N/A"
+        query = self.generate_query(sportsbet_prompt)
+        url = self.generate_statmuse_url(query)
+        table_data = self.table_extractor.get_table_from_url(url)
+        
+        if not table_data:
+            self.log_debug("No table data found - returning N/A")
+            return "N/A", None
+        
+        result = self.grade_bet(table_data, sportsbet_prompt)
+        self.log_debug(f"\n=== Final Result: {result} ===")
+        
+        return result, table_data
+        
+    except Exception as e:
+        self.log_debug(f"Error processing bet: {str(e)}")
+        return "N/A", None
