@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 from groq import Groq
 from data_statmuse_tablepull import TableExtractor
 
@@ -9,14 +9,18 @@ class BetGrader:
         self.debug = debug
         self.model = "llama-3.1-70b-versatile"
         self.debug_output = []
+        self.max_retries = 3
 
     def log_debug(self, message: str):
         if self.debug:
             print(message)
             self.debug_output.append(message)
 
-    def generate_query(self, sportsbet_prompt: str) -> str:
-        prompt = f"""Create a query to get player statistics for this bet. The query should:
+    def generate_query(self, sportsbet_prompt: str, attempt: int = 1) -> str:
+        """Generate query with different phrasings based on attempt number"""
+        
+        base_prompts = {
+            1: f"""Create a query to get player statistics for this bet. The query should:
 1. Ask for the specific stat mentioned in the bet
 2. Include the player's name and team matchup
 3. Specify the exact date
@@ -24,9 +28,32 @@ class BetGrader:
 
 Bet: {sportsbet_prompt}
 
-Return ONLY the question, nothing else."""
+Return ONLY the question, nothing else.""",
 
-        self.log_debug(f"\nGenerating Query for: {sportsbet_prompt}")
+            2: f"""Rephrase the following bet into a statistical query. Focus on:
+1. The exact player name
+2. The specific game date
+3. The team matchup
+4. The core statistic needed
+Use common statistical abbreviations (pts, ast, reb, sog, etc.)
+
+Bet: {sportsbet_prompt}
+
+Return ONLY the question, nothing else.""",
+
+            3: f"""Create a basic query for Statmuse about this player's performance. Make it:
+1. Simple and direct
+2. Use the most common stat terminology
+3. Focus on the exact date and teams
+4. Include only essential information
+
+Bet: {sportsbet_prompt}
+
+Return ONLY the question, nothing else."""
+        }
+
+        prompt = base_prompts.get(attempt, base_prompts[1])
+        self.log_debug(f"\nGenerating Query (Attempt {attempt}) for: {sportsbet_prompt}")
         self.log_debug(f"Prompt: {prompt}")
 
         response = self.client.chat.completions.create(
@@ -36,12 +63,19 @@ Return ONLY the question, nothing else."""
         )
         
         query = response.choices[0].message.content.strip()
-        self.log_debug(f"Generated Query: {query}")
+        self.log_debug(f"Generated Query (Attempt {attempt}): {query}")
         return query
 
-    def generate_statmuse_url(self, query: str) -> str:
-        prompt = f"""Convert this query to a Statmuse URL. Use the format:
-https://www.statmuse.com/[sport]/ask/[query]
+    def generate_statmuse_url(self, query: str, attempt: int = 1) -> str:
+        """Generate URL with different formats based on attempt number"""
+        
+        base_prompts = {
+            1: """Use format: https://www.statmuse.com/[sport]/ask/[query]""",
+            2: """Use format: https://www.statmuse.com/[sport]/ask?q=[query]""",
+            3: """Use format: https://www.statmuse.com/[sport]/players/[player]/game-log"""
+        }
+
+        prompt = f"""Convert this query to a Statmuse URL. {base_prompts[attempt]}
 
 Important:
 - Replace spaces with +
@@ -53,7 +87,7 @@ Query: {query}
 
 Return only the URL, nothing else."""
 
-        self.log_debug(f"\nGenerating URL for: {query}")
+        self.log_debug(f"\nGenerating URL (Attempt {attempt}) for: {query}")
         self.log_debug(f"Prompt: {prompt}")
 
         response = self.client.chat.completions.create(
@@ -63,8 +97,25 @@ Return only the URL, nothing else."""
         )
         
         url = response.choices[0].message.content.strip()
-        self.log_debug(f"Generated URL: {url}")
+        self.log_debug(f"Generated URL (Attempt {attempt}): {url}")
         return url
+
+    def try_get_table(self, sportsbet_prompt: str) -> Tuple[Optional[Dict[str, Any]], str, str]:
+        """Try different approaches to get table data"""
+        for attempt in range(1, self.max_retries + 1):
+            self.log_debug(f"\n=== Attempt {attempt} of {self.max_retries} ===")
+            
+            query = self.generate_query(sportsbet_prompt, attempt)
+            url = self.generate_statmuse_url(query, attempt)
+            table_data = self.table_extractor.get_table_from_url(url)
+            
+            if table_data:
+                self.log_debug(f"Successfully got table data on attempt {attempt}")
+                return table_data, query, url
+            
+            self.log_debug(f"Attempt {attempt} failed to get table data")
+        
+        return None, "", ""
 
     def grade_bet(self, table_data: Dict[str, Any], sportsbet_prompt: str) -> str:
         prompt = f"""Grade this sports bet based on the statistical data.
@@ -77,6 +128,8 @@ Bet Format Explanation:
 
 Original Bet: {sportsbet_prompt}
 Statistical Data: {table_data}
+
+Use your best judgement based on the data available, sometimes PTS is represented as P, or SOG is Shots on Goal, so you're really looking for Shots, or S.  Review the data carefully and come to a proper conclusion with your knowledge of the sport and how its statistics are commonly tracked.  You are a professional sports better, sports analyst, and also a professional statistician.
 
 Analyze the data carefully and respond with ONLY one of these options: 'Win', 'Loss', 'Push', or 'N/A'"""
 
@@ -100,13 +153,14 @@ Analyze the data carefully and respond with ONLY one of these options: 'Win', 'L
             self.debug_output = []
             self.log_debug(f"\n=== Processing Bet: {sportsbet_prompt} ===")
 
-            query = self.generate_query(sportsbet_prompt)
-            url = self.generate_statmuse_url(query)
-            table_data = self.table_extractor.get_table_from_url(url)
+            table_data, final_query, final_url = self.try_get_table(sportsbet_prompt)
             
             if not table_data:
-                self.log_debug("No table data found - returning N/A")
+                self.log_debug("Failed to get table data after all attempts - returning N/A")
                 return "N/A", None
+            
+            self.log_debug(f"Successfully retrieved table using query: {final_query}")
+            self.log_debug(f"Final URL used: {final_url}")
             
             result = self.grade_bet(table_data, sportsbet_prompt)
             self.log_debug(f"\n=== Final Result: {result} ===")
