@@ -6,23 +6,23 @@ import os
 import pandas as pd
 from datetime import datetime
 
-# Set page config
+# Set page config with initial hidden sidebar
 st.set_page_config(
     page_title="Sports Bet Grader",
     page_icon="🎲",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="collapsed"  # This will hide the sidebar by default
 )
 
-# Initialize session state for storing API key
+# Initialize session state
+if 'show_settings' not in st.session_state:
+    st.session_state.show_settings = False
 if 'groq_api_key' not in st.session_state:
-    # Try multiple sources for API key
     api_key = (
-        os.getenv('GROQ_API_KEY', '') or  # Try environment variable first
-        getattr(st.secrets, 'GROQ_API_KEY', '') if hasattr(st.secrets, 'GROQ_API_KEY') else ''  # Then try secrets
+        os.getenv('GROQ_API_KEY', '') or 
+        getattr(st.secrets, 'GROQ_API_KEY', '') if hasattr(st.secrets, 'GROQ_API_KEY') else ''
     )
     st.session_state.groq_api_key = api_key
-
-# Initialize history
 if 'history' not in st.session_state:
     st.session_state.history = []
 
@@ -41,33 +41,38 @@ def grade_bet(bet: str, api_key: str, show_debug: bool = False) -> tuple[str, li
     return result, grader.debug_output, table_data
 
 def main():
-    st.title("🎲 Sports Bet Grader")
-    
-    # Sidebar for API key and history
-    with st.sidebar:
-        st.header("Settings")
-        
-        # API Key input with current value
-        api_key = st.text_input(
-            "Enter Groq API Key",
-            type="password",
-            value=st.session_state.groq_api_key,
-            help="Enter your Groq API key. It will be stored in the session state."
-        )
-        st.session_state.groq_api_key = api_key
-        
-        # Show API key status
-        if st.session_state.groq_api_key:
-            st.success("API Key is set")
-        else:
-            st.warning("Please enter an API Key to use the app")
-        
-        # Clear history button
-        if st.button("Clear History") and st.session_state.history:
-            st.session_state.history = []
-            st.success("History cleared!")
+    # Create a top-right settings button
+    col1, col2 = st.columns([6, 1])
+    with col1:
+        st.title("🎲 Sports Bet Grader")
+    with col2:
+        if st.button("⚙️ Settings"):
+            st.session_state.show_settings = not st.session_state.show_settings
 
-    # Main content
+    # Show settings in a modal/expander instead of sidebar
+    if st.session_state.show_settings:
+        with st.expander("Settings", expanded=True):
+            # API Key input with current value
+            new_api_key = st.text_input(
+                "Enter Groq API Key",
+                type="password",
+                value=st.session_state.groq_api_key,
+                help="Enter your Groq API key. It will be stored in the session state."
+            )
+            st.session_state.groq_api_key = new_api_key
+            
+            # Show API key status
+            if st.session_state.groq_api_key:
+                st.success("API Key is set")
+            else:
+                st.warning("Please enter an API Key to use the app")
+            
+            # Clear history button
+            if st.button("Clear History") and st.session_state.history:
+                st.session_state.history = []
+                st.success("History cleared!")
+
+    # Main content area tabs
     tab1, tab2 = st.tabs(["Grade Bets", "History"])
 
     with tab1:
@@ -95,7 +100,7 @@ def main():
 
         if submitted:
             if not st.session_state.groq_api_key:
-                st.error("Please enter your Groq API key in the sidebar first!")
+                st.error("Please open settings (⚙️) and enter your Groq API key first!")
                 return
 
             try:
